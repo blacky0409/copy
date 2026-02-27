@@ -319,7 +319,7 @@ void ssd_read_blk(struct nand_block *blk, struct file *file, loff_t *f_pos){
 	if(ret < 0){
 		printk("Failed to read block npgs\n");
 	}
-	blk->pg = kmalloc(sizeof(struct nand_page) * blk->npgs, GFP_KERNEL);
+	blk->pg = kmalloc(sizeof(struct nand_page) * blk->npgs,GFP_KERNEL);
 	ret = kernel_read(file,&blk->ipc,sizeof(int),f_pos);
 	if(ret < 0){
 		printk("Failed to read block ipc\n");
@@ -365,14 +365,13 @@ void ssd_read_ch(struct ssd_channel *ch, struct ssdparams *spp, struct file *fil
 
 void ssd_free_pg(struct nand_page *pg){
 	kfree(pg->sec);
+    pg->sec = NULL;
 }
 void ssd_free_blk(struct nand_block *blk){
 	int i;
 	for(i=0; i < blk->npgs; i++){
 		ssd_free_pg(&(blk->pg[i]));
 	}
-	kfree(blk->pg);
-    blk->pg = NULL;
 }
 void ssd_free_pl(struct nand_plane *pl){
 	int i;
@@ -480,23 +479,18 @@ int load_device(struct nvmev_dev *nvmev_vdev,const char * root)
 		int lun_wp;
 		bool check_point_chdie = false;
 
-		for(lun_wp=0; lun_wp < spp->luns_per_ch; lun_wp++){
-			for(ch_wp=0; ch_wp < spp->nchs; ch_wp++){
-				uint64_t idx = ch_wp * spp->luns_per_ch + lun_wp;
-			 	if(ch_wp == conv_ftls->wp.ch && lun_wp == conv_ftls->wp.lun)
-				{
-					conv_ftls->page_counter[idx] = conv_ftls->wp.pg;
-					check_point_chdie = true;
-				}
-				else if(!check_point_chdie){
-					conv_ftls->page_counter[idx] = conv_ftls->wp.pg - (conv_ftls->wp.pg % spp->pgs_per_oneshotpg); 
-				}
-				else{
-					conv_ftls->page_counter[idx] = conv_ftls->wp.pg - (conv_ftls->wp.pg % spp->pgs_per_oneshotpg) + spp->pgs_per_oneshotpg; 
-				}
-			}
-		}
+		memset(conv_ftls->page_counter, 0, sizeof(int64_t) * spp->nchs * spp->luns_per_ch);
 
+		for (i = 0; i < spp->tt_pgs; i++) {
+ 		   struct ppa *ppa = &conv_ftls->maptbl[i];
+    		if (ppa->ppa != UNMAPPED_PPA) {
+       			uint64_t idx = ppa->g.ch * spp->luns_per_ch + ppa->g.lun;
+        		if (ppa->g.blk == conv_ftls->wp.blk) {
+            		if ((int64_t)(ppa->g.pg + 1) > conv_ftls->page_counter[idx])
+                		conv_ftls->page_counter[idx] = ppa->g.pg + 1;
+        		}
+    		}
+		}
 
 		ret = kernel_read(file,&wp_id,sizeof(int),&f_pos);
 		if(ret < 0){
